@@ -24,7 +24,7 @@ from extraction import extract_patches, reconstruct_volume
 import SimpleITK as sitk
 
 from train_options import TrainOptions
-from utils import train_step, visualize_training_output, read_nii
+from utils import train_step, visualize_training_output, read_nii, read_edge_nii
 
 
 def train(args):
@@ -78,13 +78,13 @@ def train(args):
             # for each epoch iterate over subset of dataset
             # for n, img_dir in enumerate(sorted(os.listdir(train_data_dir))):
             for n, nii_name in enumerate(sorted(glob.glob1(train_data_dir, "*.nii"))):
-                # if n < 1:
+                # if n > 1:
                 #     continue
                 print("\n--------img_dir: ", nii_name)
                 nii_path = os.path.join(train_data_dir, nii_name)
                 img = read_nii(nii_path)
                 nii_edge_path = nii_path.replace('.nii', '_edge.nii.gz')
-                edge = read_nii(nii_edge_path)
+                edge = read_edge_nii(nii_edge_path)
                 patches = extract_patches(img=img, patch_shape=input_shape[:3], extraction_step=[IMG_STRIDE, 0, 0])
                 edge_patches = extract_patches(img=edge, patch_shape=input_shape[:3], extraction_step=[IMG_STRIDE, 0, 0])
                 for l in range(patches.shape[0]):
@@ -93,15 +93,17 @@ def train(args):
                     edge_patch = edge_patches[l, :]
                     mask = circlemask_cropped(input_shape)
                     patch = np.expand_dims(patch, axis=[0,-1])  # 加第一个轴
-                    edge_patch = np.expand_dims(edge_patch, axis=[0,-1])  # 加第一个轴
+                    input_edge = np.expand_dims(edge_patch, axis=[0,-1])  # 加第一个轴
                     target = patch
                     input_image = target.copy()
                     input_image[mask] = -1
+                    input_edge[~mask] = -1
+                    # input_image = np.concatenate([input_image, input_edge, mask], axis=-1)
                     target = tf.convert_to_tensor(target, dtype=tf.float16, name='target')
                     mask = tf.convert_to_tensor(mask, dtype=tf.float16, name='mask')
                     input_image = tf.convert_to_tensor(input_image, dtype=tf.float16, name='input_image')
                     # training step
-                    loss, pred_img, gen_vgg, tar_vgg = train_step(input_image, target, mask, epoch, generator, discriminator, Vgg,
+                    loss, pred_img, gen_vgg, tar_vgg = train_step(input_image, input_edge, target, mask, epoch, generator, discriminator, Vgg,
                                                generator_optimizer, discriminator_optimizer, n, l, training=True)
                 if (n + 1) % 20 == 0:
                     summary_images, summary_images_act = visualize_training_output(input_image, target, pred_img,
@@ -122,21 +124,28 @@ def train(args):
                     # log val data to Tensorboard
                     num1 = np.random.randint(0, len(test_img_dirs))
                     nii_val_path = os.path.join(test_data_dir, test_img_dirs[num1])
+                    nii_edge_valpath = nii_val_path.replace('.nii', '_edge.nii.gz')
                     img_val = read_nii(nii_val_path)
+                    edge_val = read_edge_nii(nii_edge_valpath)
                     patches_val = extract_patches(img=img_val, patch_shape=input_shape[:3], extraction_step=[IMG_STRIDE, 0, 0])
+                    edge_patches_val = extract_patches(img=edge_val, patch_shape=input_shape[:3], extraction_step=[IMG_STRIDE, 0, 0])
                     # num2 slice from one random patient
                     num2 = np.random.randint(0, len(patches_val))
                     patch_val = patches_val[num2, :]  # patch排序
+                    edge_patch_val = edge_patches_val[num2, :]  # patch排序
                     mask_val = circlemask_cropped(input_shape)
                     patch_val = np.expand_dims(patch_val, axis=[0,-1])  # 加第一个轴
+                    input_edge_val = np.expand_dims(edge_patch_val, axis=[0,-1])  # 加第一个轴
                     target_val = patch_val
                     input_image_val = target_val.copy()
                     input_image_val[mask_val] = -1
+                    input_edge_val[~mask_val] = -1
+                    # input_image_val = np.concatenate([input_image_val, input_edge_val, mask_val], axis=-1)
                     target_val = tf.convert_to_tensor(target_val, dtype=tf.float16, name='target_val')
                     mask_val = tf.convert_to_tensor(mask_val, dtype=tf.float16, name='mask_val')
                     input_image_val = tf.convert_to_tensor(input_image_val, dtype=tf.float16, name='input_image_val')
                     # create val loss info
-                    loss_val, pred_img, gen_vgg, tar_vgg = train_step(input_image_val, target_val, mask_val, epoch,
+                    loss_val, pred_img, gen_vgg, tar_vgg = train_step(input_image_val, input_edge_val, target_val, mask_val, epoch,
                                                                       generator, discriminator, Vgg, generator_optimizer,
                                                                       discriminator_optimizer, num1, num2, training=False)
 
@@ -192,34 +201,35 @@ def test(args):
         status = checkpoint.restore(tf.train.latest_checkpoint(checkpoint_restore_dir))
 
         # for n, img_dir in enumerate(sorted(os.listdir(test_data_dir))):
-        for n, img_dir in enumerate(sorted(glob.glob1(test_data_dir, '*.nii'))):
+        for n, nii_name in enumerate(sorted(glob.glob1(test_data_dir, '*.nii'))):
             # if n > 0:
             #     continue
-            print("img_dir: ", img_dir)
-            nii_path = os.path.join(test_data_dir, img_dir)
-            img = sitk.ReadImage(nii_path)
-            img = sitk.GetArrayFromImage(img)
-            truncted_num = img.shape[0] % 16
-            img = img[:img.shape[0] - truncted_num, :, :]
-            img[img < 0] = 0
-            img[img > 3000] = 3000
-            img = 2 * img / 3000 - 1  # # nii follewed by matlab
+            print("img_dir: ", nii_name)
+            nii_path = os.path.join(test_data_dir, nii_name)
+            img = read_nii(nii_path)
+            nii_edge_path = nii_path.replace('.nii', '_edge.nii.gz')
+            edge = read_edge_nii(nii_edge_path)
             patches = extract_patches(img=img, patch_shape=input_shape[:3], extraction_step=[IMG_STRIDE, 0, 0])
+            edge_patches = extract_patches(img=edge, patch_shape=input_shape[:3], extraction_step=[IMG_STRIDE, 0, 0])
             start = time.time()
             for l in range(patches.shape[0]):
                 patch = patches[l, :]  # patch排序
+                edge_patch = edge_patches[l, :]
                 mask = circlemask_cropped(input_shape)
-                mask = np.expand_dims(mask, axis=0)
-                patch = np.expand_dims(patch, axis=[0,-1])  # 加第一个轴
+                patch = np.expand_dims(patch, axis=[0, -1])  # 加第一个轴
+                input_edge = np.expand_dims(edge_patch, axis=[0, -1])  # 加第一个轴
                 target = patch
                 input_image = target.copy()
                 input_image[mask] = -1
+                input_edge[~mask] = -1
+                # input_image = np.concatenate([input_image, input_edge, mask], axis=-1)
+                # target = tf.convert_to_tensor(target, dtype=tf.float16, name='target')
                 mask = tf.convert_to_tensor(mask, dtype=tf.float16, name='mask')
                 input_image = tf.convert_to_tensor(input_image, dtype=tf.float16, name='input_image')
 
-                prediction = generator(input_image, training=False)
+                prediction = generator(tf.concat([input_image, input_edge, mask], axis=-1), training=False)
 
-                prediction = (prediction * mask) + (input_image * (1 - mask))
+                # prediction = (prediction * mask) + (input_image * (1 - mask))
                 patches[l, :] = prediction.numpy()[0, ..., 0]  # synthetically uncropped
 
             recon_img = reconstruct_volume(patches=patches, expected_shape=img.shape, extraction_step=(16, 1, 1))
@@ -227,7 +237,7 @@ def test(args):
             # recon_img = (recon_img * 4024) - 1024
             recon_img = recon_img * 3000
             volout = sitk.GetImageFromArray(recon_img.astype(np.int16))
-            sitk.WriteImage(volout, "dataset/%s_testout.nii" % img_dir[:-4])
+            sitk.WriteImage(volout, "dataset/%s_testout.nii" % nii_name[:-4])
             print('Time taken for prediction {} is {:.2f} sec\n'.format(n, time.time() - start))
 
 

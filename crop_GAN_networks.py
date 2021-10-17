@@ -8,7 +8,9 @@ import tensorflow.keras.layers as layers
 from train_options import TrainOptions
 
 args = TrainOptions().parse()
-input_shape = [args.IMG_DEPTH, args.IMG_HEIGHT, args.IMG_WIDTH, 1]
+# input_shape = [args.IMG_DEPTH, args.IMG_HEIGHT, args.IMG_WIDTH, 1]
+gen_input_shape = [args.IMG_DEPTH, args.IMG_HEIGHT, args.IMG_WIDTH, 3]
+dis_input_shape = [args.IMG_DEPTH, args.IMG_HEIGHT, args.IMG_WIDTH, 1]
 
 
 class gated_conv(tf.keras.layers.Layer):
@@ -45,7 +47,7 @@ def instance_norm_layer():
 
 
 # def generator(features = 64, im_shape=[128,128,128,1]):
-def generator(features=32, im_shape=input_shape):
+def generator(features=32, im_shape=gen_input_shape):
     cropped_im = tf.keras.layers.Input(im_shape)
 
     encode = [
@@ -116,7 +118,7 @@ class dlayer(tf.keras.layers.Layer):
 
 
 # def discriminator_with_localmask(features = 64, im_shape=[128,128,128,1]):
-def discriminator_with_localmask(features=32, im_shape=input_shape):
+def discriminator_with_localmask(features=32, im_shape=dis_input_shape):
     # im_shape = [256, 256, 32, 1]
     inputs = tf.keras.layers.Input(im_shape, name='disc_input')
     targets = tf.keras.layers.Input(im_shape, name='disc_target')
