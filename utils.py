@@ -22,14 +22,24 @@ def read_nii(nii_path):
     img = 2 * img / 3000 - 1  # # nii follewed by matlab
     return img
 
-def train_step(input_image, target, mask, epoch, generator, discriminator, vgg_net, generator_optimizer,
+def read_edge_nii(nii_edge_path):
+    edge = sitk.ReadImage(nii_edge_path)
+    edge = sitk.GetArrayFromImage(edge)
+    truncted_num = edge.shape[0] % 16
+    edge = edge[:edge.shape[0] - truncted_num, :, :]
+    edge[edge<1] = -1
+
+    return edge
+
+def train_step(input_image, input_edge, target, mask, epoch, generator, discriminator, vgg_net, generator_optimizer,
                discriminator_optimizer, n, l, training=True):
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
         # output from generator
-        gen_output = generator(input_image, training=training)
+        # gen_output = generator(input_image, training=training)
+        gen_output = generator(tf.concat([input_image, input_edge, mask], axis=-1), training=training)
 
         # replace known region with input
-        # gen_output = (gen_output * mask) + (input_image * (1 - mask))  # mask is 1 in background, 0 in known region
+        gen_output = (gen_output * mask) + (input_image * (1 - mask))  # mask is 1 in background, 0 in known region
         #
         # outputs from VGG model
         gen_vgg = vgg_net(gen_output)

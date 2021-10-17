@@ -1,3 +1,11 @@
+# Folders
+data_ori/
+dataset/
+output/*
+*.ipynb
+.idea/
+output_withoutedge/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
